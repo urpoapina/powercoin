@@ -2523,6 +2523,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
     if (strCommand == "version")
     {
+
         // Each connection can only send one version message
         if (pfrom->nVersion != 0)
         {
@@ -2604,6 +2605,12 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             }
         }
 
+        if (pfrom->nStartingHeight > (Checkpoints::GetTotalBlocksEstimate() + 25000)){
+            printf("pfrom->nStartingHeight > (Checkpoints::GetTotalBlocksEstimate() + 25000)\n");
+            pfrom->fDisconnect = true;
+            pfrom->Misbehaving(100);
+            return false;
+        }
         // Ask the first connected node for block updates
         static int nAskedForBlocks = 0;
         if (!pfrom->fClient && !pfrom->fOneShot &&
