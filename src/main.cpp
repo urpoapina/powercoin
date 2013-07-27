@@ -830,28 +830,44 @@ uint256 static GetOrphanRoot(const CBlock* pblock)
     return pblock->GetHash();
 }
 
+static const int nNewSettingsTakeOverHeight = 109500; // Block height where new settings takeover
+static const int64 nOldTargetTimespan = 12 * 60 * 60;
+static const int64 nOldTargetSpacing = 30;
+static const int64 nNewTargetTimespan = 3 * 60 * 60;
+static const int64 nNewTargetSpacing = 45;
 
+static int64 nTargetTimespan = 0;
+static int64 nTargetSpacing = 0;
+static int64 nInterval = 0;
 
 int64 static GetBlockValue(int nHeight, int64 nFees)
 {
-    int64 nSubsidy = 40 * COIN;
+    int64 nSubsidy = 0;
 
-	// printf(">> nHeight = %d\n", nHeight);
-
-    if(nHeight > 16588800)   // after about 16 years or 16,588,800 blocks, no more mining
+    if (nHeight < nNewSettingsTakeOverHeight){
+      nSubsidy = 40 * COIN;
+      if(nHeight > 16588800)   // after about 16 years or 16,588,800 blocks, no more mining
         return 0;
+     // Subsidy is cut in half every 2,073,600 blocks, which will occur approximately every 2 years
+      nSubsidy >>= (nHeight / 2073600); // Powercoin: 2073.6K blocks in ~2 years (720*24*60 coinminute * 2 block/min)
+    } else {
+      nSubsidy = (40 * nNewTargetSpacing / nOldTargetSpacing) * COIN; // New block target time is different, so adjust subsidies accordingly.
+      nSubsidy >>= (nHeight / (1382400 - (nNewSettingsTakeOverHeight * nTargetSpacing / nNewTargetSpacing) + nNewSettingsTakeOverHeight)) ; // (720*24*60* 60/45 block/min = 1382400)
+      if(nHeight > (11059200 - (nNewSettingsTakeOverHeight * nOldTargetSpacing / nNewTargetSpacing) + nNewSettingsTakeOverHeight)){   // after about 16 years, no more mining
+        nSubsidy = 0 * COIN;
+      }
+    }
 
-	// Subsidy is cut in half every 2,073,600 blocks, which will occur approximately every 2 years
-    nSubsidy >>= (nHeight / 2073600); // Powercoin: 2073.6K blocks in ~2 years
+
+//	printf(">> nHeight = %d\n", nHeight);
+//      printf("SUPSIDY on %i + %i\n",nSubsidy, nFees);
+
 
     return nSubsidy + nFees;
 }
 
 
 
-static const int64 nTargetTimespan = 12 * 60 * 60;	// Powercoin: 0.5 day
-static const int64 nTargetSpacing = 30;				// Powercoin: 30 sec
-static const int64 nInterval = nTargetTimespan / nTargetSpacing;
 
 //
 // minimum amount of work that could possibly be required nTime after
@@ -859,9 +875,10 @@ static const int64 nInterval = nTargetTimespan / nTargetSpacing;
 //
 unsigned int ComputeMinWork(unsigned int nBase, int64 nTime)
 {
+
     // Testnet has min-difficulty blocks
     // after nTargetSpacing*2 time between blocks:
-    if (fTestNet && nTime > nTargetSpacing*2)
+    if (fTestNet && nTime > nOldTargetSpacing*2)
         return bnProofOfWorkLimit.GetCompact();
 
     CBigNum bnResult;
@@ -871,7 +888,29 @@ unsigned int ComputeMinWork(unsigned int nBase, int64 nTime)
         // Maximum 400% adjustment...
         bnResult *= 4;
         // ... in best-case exactly 4-times-normal target time
-        nTime -= nTargetTimespan*4;
+        nTime -= nOldTargetTimespan*4; //???
+    }
+    if (bnResult > bnProofOfWorkLimit)
+        bnResult = bnProofOfWorkLimit;
+    return bnResult.GetCompact();
+}
+
+unsigned int newComputeMinWork(unsigned int nBase, int64 nTime)
+{
+
+    // Testnet has min-difficulty blocks
+    // after nTargetSpacing*2 time between blocks:
+    if (fTestNet && nTime > nNewTargetSpacing*2)
+        return bnProofOfWorkLimit.GetCompact();
+
+    CBigNum bnResult;
+    bnResult.SetCompact(nBase);
+    while (nTime > 0 && bnResult < bnProofOfWorkLimit)
+    {
+        // Maximum 400% adjustment...
+        bnResult *= 6;
+        // ... in best-case exactly 4-times-normal target time
+        nTime -= nNewTargetTimespan*6; //???
     }
     if (bnResult > bnProofOfWorkLimit)
         bnResult = bnProofOfWorkLimit;
@@ -881,6 +920,19 @@ unsigned int ComputeMinWork(unsigned int nBase, int64 nTime)
 unsigned int static GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlock *pblock)
 {
     unsigned int nProofOfWorkLimit = bnProofOfWorkLimit.GetCompact();
+    unsigned int nMaxMultiply = 0;
+
+	if ((pindexLast->nHeight+1) < nNewSettingsTakeOverHeight){
+      nTargetTimespan = nOldTargetTimespan;
+	  nTargetSpacing = nOldTargetSpacing;
+	  nMaxMultiply = 4;
+	} else {
+      nTargetTimespan = nNewTargetTimespan;
+	  nTargetSpacing = nNewTargetSpacing;
+	  nMaxMultiply = 6;
+	}
+
+	nInterval = nTargetTimespan / nTargetSpacing;
 
     // Genesis block
     if (pindexLast == NULL)
@@ -924,10 +976,10 @@ unsigned int static GetNextWorkRequired(const CBlockIndex* pindexLast, const CBl
     // Limit adjustment step
     int64 nActualTimespan = pindexLast->GetBlockTime() - pindexFirst->GetBlockTime();
     printf("  nActualTimespan = %"PRI64d"  before bounds\n", nActualTimespan);
-    if (nActualTimespan < nTargetTimespan/4)
-        nActualTimespan = nTargetTimespan/4;
-    if (nActualTimespan > nTargetTimespan*4)
-        nActualTimespan = nTargetTimespan*4;
+    if (nActualTimespan < nTargetTimespan / nMaxMultiply)
+        nActualTimespan = nTargetTimespan / nMaxMultiply;
+    if (nActualTimespan > nTargetTimespan * nMaxMultiply)
+        nActualTimespan = nTargetTimespan * nMaxMultiply;
 
     // Retarget
     CBigNum bnNew;
@@ -955,7 +1007,7 @@ bool CheckProofOfWork(uint256 hash, unsigned int nBits)
     // Check range
     if (bnTarget <= 0 || bnTarget > bnProofOfWorkLimit)
 	{
-		// printf("bnTarget = %s, bnProofOfWorkLimit = %s", bnTarget.ToString().c_str(), bnProofOfWorkLimit.ToString().c_str());
+	// printf("bnTarget = %s, bnProofOfWorkLimit = %s", bnTarget.ToString().c_str(), bnProofOfWorkLimit.ToString().c_str());
         return error("CheckProofOfWork() : nBits below minimum work");
 	}
 
@@ -1343,8 +1395,10 @@ bool CBlock::DisconnectBlock(CTxDB& txdb, CBlockIndex* pindex)
 bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
 {
     // Check it again in case a previous version let a bad block in
-    if (!CheckBlock())
+    if (!CheckBlock()){
+        printf("CHECKBLOCK FALSE\n");
         return false;
+    }
 
     // Do not allow blocks that contain transactions which 'overwrite' older transactions,
     // unless those are already completely spent.
@@ -1376,8 +1430,10 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
             CTxIndex txindexOld;
             if (txdb.ReadTxIndex(hashTx, txindexOld)) {
                 BOOST_FOREACH(CDiskTxPos &pos, txindexOld.vSpent)
-                    if (pos.IsNull())
-                        return false;
+                    if (pos.IsNull()){
+                      printf("ISNULL FALSE\n");
+                      return false;
+                    }
             }
         }
 
@@ -1392,8 +1448,10 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
         if (!tx.IsCoinBase())
         {
             bool fInvalid;
-            if (!tx.FetchInputs(txdb, mapQueuedChanges, true, false, mapInputs, fInvalid))
-                return false;
+            if (!tx.FetchInputs(txdb, mapQueuedChanges, true, false, mapInputs, fInvalid)){
+              printf("FETCHINPUTS FALSE\n");
+              return false;
+            }
 
             if (fStrictPayToScriptHash)
             {
@@ -1407,8 +1465,10 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
 
             nFees += tx.GetValueIn(mapInputs)-tx.GetValueOut();
 
-            if (!tx.ConnectInputs(mapInputs, mapQueuedChanges, posThisTx, pindex, true, false, fStrictPayToScriptHash))
-                return false;
+            if (!tx.ConnectInputs(mapInputs, mapQueuedChanges, posThisTx, pindex, true, false, fStrictPayToScriptHash)){
+              printf("CONNECTINPUTS FALSE\n");
+              return false;
+            }
         }
 
         mapQueuedChanges[hashTx] = CTxIndex(posThisTx, tx.vout.size());
@@ -1421,8 +1481,10 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
             return error("ConnectBlock() : UpdateTxIndex failed");
     }
 
-    if (vtx[0].GetValueOut() > GetBlockValue(pindex->nHeight, nFees))
+    if (vtx[0].GetValueOut() > GetBlockValue(pindex->nHeight, nFees)){
+        printf("GETVALUEOUT FALSE\n");
         return false;
+    }
 
     // Update block index on disk without changing it in memory.
     // The memory index structure will be changed after the db commits.
@@ -1777,7 +1839,19 @@ bool CBlock::CheckBlock() const
     // Check merkleroot
     if (hashMerkleRoot != BuildMerkleTree())
         return DoS(100, error("CheckBlock() : hashMerkleRoot mismatch"));
+/*
+    // New checks (from acceptblock())
+    uint256 hash = GetHash();
+    // Get prev block index
+    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashPrevBlock);
+    if (mi == mapBlockIndex.end())
+        return DoS(10, error("CheckBlock() : prev block not found"));
+    CBlockIndex* pindexPrev = (*mi).second;
+    int nHeight = pindexPrev->nHeight+1;
 
+    if (!Checkpoints::CheckBlock(nHeight, hash))
+        return DoS(100, error("CheckBlock() : rejected by checkpoint lockin at %d", nHeight));
+*/
     return true;
 }
 
@@ -1785,6 +1859,30 @@ bool CBlock::AcceptBlock()
 {
     // Check for duplicate
     uint256 hash = GetHash();
+/////////////
+/*
+    CBlockIndex* pindexNew = Checkpoints::CheckCheckpoints();
+    if (!(pindexNew == NULL)){
+        return error("AcceptBlock() : Checkpoints doesnt match blockchain");
+
+    CTxDB txdb;
+    if (!txdb.TxnBegin())
+        return error("AcceptBlock() : DB Error");
+
+    txdb.WriteBlockIndex(CDiskBlockIndex(pindexNew));
+    if (!txdb.TxnCommit())
+        return error("AcceptBlock() : DB commit error");
+
+        if (!SetBestChain(txdb, pindexNew))
+            return error("AcceptBlock() : Setting chain to checkpoint failed");
+    txdb.Close();
+     }
+
+
+
+*/
+/////////////////
+ 
     if (mapBlockIndex.count(hash))
         return error("AcceptBlock() : block already in mapBlockIndex");
 
@@ -1837,6 +1935,9 @@ bool CBlock::AcceptBlock()
 
 bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 {
+     if(!pblock->CheckCheckpointsVsBlockchain())
+       return error("ProcessBloc() : Checkpoint / blockchain mismatch");
+
     // Check for duplicate
     uint256 hash = pblock->GetHash();
     if (mapBlockIndex.count(hash))
@@ -1844,10 +1945,12 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
     if (mapOrphanBlocks.count(hash))
         return error("ProcessBlock() : already have block (orphan) %s", hash.ToString().substr(0,20).c_str());
 
+    //    printf("prel\n");
     // Preliminary checks
     if (!pblock->CheckBlock())
         return error("ProcessBlock() : CheckBlock FAILED");
 
+    //    printf("checkp\n");
     CBlockIndex* pcheckpoint = Checkpoints::GetLastCheckpoint(mapBlockIndex);
     if (pcheckpoint && pblock->hashPrevBlock != hashBestChain)
     {
@@ -1862,7 +1965,12 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
         CBigNum bnNewBlock;
         bnNewBlock.SetCompact(pblock->nBits);
         CBigNum bnRequired;
-        bnRequired.SetCompact(ComputeMinWork(pcheckpoint->nBits, deltaTime));
+
+		if (nBestHeight < nNewSettingsTakeOverHeight){
+          bnRequired.SetCompact(ComputeMinWork(pcheckpoint->nBits, deltaTime));
+		} else {
+          bnRequired.SetCompact(newComputeMinWork(pcheckpoint->nBits, deltaTime));
+		}
         if (bnNewBlock > bnRequired)
         {
             if (pfrom)
@@ -1893,6 +2001,7 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
     // Recursively process any orphan blocks that depended on this one
     vector<uint256> vWorkQueue;
     vWorkQueue.push_back(hash);
+
     for (unsigned int i = 0; i < vWorkQueue.size(); i++)
     {
         uint256 hashPrev = vWorkQueue[i];
@@ -1906,6 +2015,7 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
             mapOrphanBlocks.erase(pblockOrphan->GetHash());
             delete pblockOrphan;
         }
+
         mapOrphanBlocksByPrev.erase(hashPrev);
     }
 
@@ -2858,13 +2968,15 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
         printf("received block %s\n", block.GetHash().ToString().substr(0,20).c_str());
         // block.print();
-
         CInv inv(MSG_BLOCK, block.GetHash());
         pfrom->AddInventoryKnown(inv);
 
-        if (ProcessBlock(pfrom, &block))
+        if (ProcessBlock(pfrom, &block)){
             mapAlreadyAskedFor.erase(inv);
-        if (block.nDoS) pfrom->Misbehaving(block.nDoS);
+        }
+        if (block.nDoS) {
+	pfrom->Misbehaving(block.nDoS);
+        }
     }
 
 
@@ -3322,6 +3434,7 @@ void SHA256Transform(void* pstate, void* pinput, const void* pinit)
 // between calls, but periodically or if nNonce is 0xffff0000 or above,
 // the block is rebuilt and nNonce starts over at zero.
 //
+/*
 unsigned int static ScanHash_CryptoPP(char* pmidstate, char* pdata, char* phash1, char* phash, unsigned int& nHashesDone)
 {
     unsigned int& nNonce = *(unsigned int*)(pdata + 12);
@@ -3347,7 +3460,7 @@ unsigned int static ScanHash_CryptoPP(char* pmidstate, char* pdata, char* phash1
         }
     }
 }
-
+*/
 // Some explaining would be appreciated
 class COrphan
 {
@@ -3845,4 +3958,24 @@ void GenerateBitcoins(bool fGenerate, CWallet* pwallet)
             Sleep(10);
         }
     }
+}
+
+bool CBlock::CheckCheckpointsVsBlockchain(){
+    CBlockIndex* pindexNew = Checkpoints::CheckCheckpoints();
+    if (!(pindexNew == NULL)){
+
+      CTxDB txdb;
+      if (!txdb.TxnBegin())
+      return error("AcceptBlock() : DB Error");
+
+      txdb.WriteBlockIndex(CDiskBlockIndex(pindexNew));
+      if (!txdb.TxnCommit())
+      return error("AcceptBlock() : DB commit error");
+
+      if (!(SetBestChain(txdb, pindexNew))){
+        txdb.Close();
+        return error("AcceptBlock() : Setting chain to checkpoint failed");
+      }
+    }
+    return true;
 }

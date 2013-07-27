@@ -36,7 +36,7 @@ string EncodeAddress(const CService& addr)
         tmp.port = htons(addr.GetPort());
 
         vector<unsigned char> vch(UBEGIN(tmp), UEND(tmp));
-        return string("u") + EncodeBase58Check(vch);
+        return string("p") + EncodeBase58Check(vch);
     }
     return "";
 }
@@ -300,7 +300,7 @@ void ThreadIRCSeed2(void* parg)
         } else {
             // randomly join #powercoin00-#powercoin99
             int channel_number = GetRandInt(100);
-            channel_number = 0; // Powercoin: for now, just use one channel
+            channel_number = 1; // Powercoin: for now, just use one channel
             Send(hSocket, strprintf("JOIN #powercoin%02d\r", channel_number).c_str());
             Send(hSocket, strprintf("WHO #powercoin%02d\r", channel_number).c_str());
         }
@@ -338,7 +338,7 @@ void ThreadIRCSeed2(void* parg)
                 printf("IRC got join\n");
             }
 
-            if (pszName[0] == 'u')
+            if (pszName[0] == 'p')
             {
                 CAddress addr;
                 if (DecodeAddress(pszName, addr))

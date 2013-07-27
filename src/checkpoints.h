@@ -6,6 +6,10 @@
 #define  BITCOIN_CHECKPOINT_H
 
 #include <map>
+#include <string>
+#include <fstream>
+
+#include "util.h"
 
 class uint256;
 class CBlockIndex;
@@ -23,6 +27,9 @@ namespace Checkpoints
 
     // Returns last CBlockIndex* in mapBlockIndex that is a checkpoint
     CBlockIndex* GetLastCheckpoint(const std::map<uint256, CBlockIndex*>& mapBlockIndex);
+
+    bool ReadCheckpointFile();
+    CBlockIndex* CheckCheckpoints();
 }
 
 #endif

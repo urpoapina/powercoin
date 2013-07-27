@@ -7,6 +7,7 @@
 #include "db.h"
 #include "util.h"
 #include "main.h"
+#include "checkpoints.h"
 #include <boost/version.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -536,7 +537,7 @@ bool CTxDB::LoadBlockIndex()
         if (!block.ReadFromDisk(pindex))
             return error("LoadBlockIndex() : block.ReadFromDisk failed");
         // check level 1: verify block validity
-        if (nCheckLevel>0 && !block.CheckBlock())
+        if (nCheckLevel>0 && (!block.CheckBlock() || !Checkpoints::CheckBlock(pindex->nHeight, pindex->GetBlockHash())))
         {
             printf("LoadBlockIndex() : *** found bad block at %d, hash=%s\n", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
             pindexFork = pindex->pprev;
