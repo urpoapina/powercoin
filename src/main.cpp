@@ -1481,9 +1481,17 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
             return error("ConnectBlock() : UpdateTxIndex failed");
     }
 
-    if (vtx[0].GetValueOut() > GetBlockValue(pindex->nHeight, nFees)){
+//  if (pindex->nHeight < nNewSettingsTakeOverHeight){ 
+    if (pindex->nHeight < 109680){ 
+      if (vtx[0].GetValueOut() > GetBlockValue(pindex->nHeight, nFees)){
         printf("GETVALUEOUT FALSE\n");
         return false;
+      }
+    } else {
+      if ((vtx[0].GetValueOut() > GetBlockValue(pindex->nHeight, nFees)) || (vtx[0].GetValueOut() == GetBlockValue(0, nFees))){
+        printf("GETVALUEOUT FALSE (OLD CLIENT BLOCK)\n");
+        return false;
+      }
     }
 
     // Update block index on disk without changing it in memory.
